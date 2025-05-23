@@ -1,0 +1,227 @@
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { LoginInput, RegisterInput } from '../shared/schema';
+import { z } from 'zod';
+import { apiRequest } from '../lib/queryClient';
+import axios from 'axios';
+
+// Token storage key for local storage
+const TOKEN_STORAGE_KEY = "trade_navigator_token";
+
+// Helper to set the authentication token in both localStorage and axios defaults
+const setAuthToken = (token: string | null) => {
+  if (token) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    // Set for axios requests
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  } else {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    // Remove from axios defaults
+    delete axios.defaults.headers.common['Authorization'];
+  }
+};
+
+// Types are imported from auth.ts
+
+type User = {
+  id: number;
+  email: string;
+  companyName: string;
+  industry: string | null;
+  subscriptionTier: string;
+  subscriptionStatus: string;
+};
+
+interface AuthResponse {
+  message: string;
+  user: User;
+  token: string;
+}
+
+export interface UserContext {
+  user: User | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  login: (data: LoginInput) => Promise<AuthResponse>;
+  register: (data: RegisterInput) => Promise<AuthResponse>;
+  logout: () => Promise<void>;
+}
+
+const AuthContext = createContext<UserContext | undefined>(undefined);
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+interface AuthProviderProps {
+  children: React.ReactNode;
+}
+
+export function AuthProvider({ children }: AuthProviderProps) {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isValidating, setIsValidating] = useState(false);
+  
+  // Debounce timeout for validation
+  let validationTimeout: NodeJS.Timeout | null = null;
+
+  // Try to restore user data from localStorage to avoid repeated logins
+  useEffect(() => {
+    const savedUser = localStorage.getItem('user_data');
+    const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+    
+    if (savedUser && token && !user) { // Only run if user is not already set
+      try {
+        // Set token for all future API requests
+        setAuthToken(token);
+        
+        // Parse and restore user data
+        const userData = JSON.parse(savedUser);
+        setUser(userData);
+        setIsLoading(false);
+        
+        // Validate token in background but don't log user out if it fails
+        validateTokenInBackground(token);
+      } catch (error) {
+        console.error('Error restoring user session:', error);
+        setIsLoading(false);
+      }
+    } else if (!savedUser || !token) {
+      setIsLoading(false);
+    }
+  }, []); // Keep empty dependency array but add user check above
+  
+  // Background validation without disrupting user experience
+  const validateTokenInBackground = async (token: string) => {
+    if (isValidating) return; // Prevent multiple calls
+    
+    // Clear any existing timeout
+    if (validationTimeout) {
+      clearTimeout(validationTimeout);
+    }
+    
+    // Wait 1 second before validating to prevent rapid calls
+    validationTimeout = setTimeout(async () => {
+      setIsValidating(true);
+      
+      try {
+        const response = await apiRequest('/api/auth/profile', {
+          method: 'GET',
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          // Update user data with fresh data from server
+          setUser(data.user);
+          // Store updated user data
+          localStorage.setItem('user_data', JSON.stringify(data.user));
+        } else {
+          console.log('Token validation failed silently - will try to continue session');
+        }
+      } catch (error) {
+        console.log('Background token validation error:', error);
+      } finally {
+        setIsValidating(false);
+      }
+    }, 1000);
+  };
+
+  const handleLogin = async (data: LoginInput): Promise<AuthResponse> => {
+    console.log('Attempting login with:', { email: data.email });
+    
+    try {
+      // Using direct fetch instead of apiRequest to better handle response
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      // Read the response text first
+      const responseText = await response.text();
+      console.log('Raw response:', responseText);
+      
+      // Try to parse the response as JSON
+      let responseData;
+      try {
+        responseData = responseText ? JSON.parse(responseText) : {};
+      } catch (e) {
+        console.error('Failed to parse JSON response:', e);
+        throw new Error('Invalid response from server');
+      }
+
+      if (!response.ok) {
+        console.log('Login response not OK:', response.status);
+        console.log('Error data:', responseData);
+        throw new Error(responseData.error || responseData.message || 'Login failed');
+      }
+
+      console.log('Login successful, storing token and user data');
+      // Store user data in localStorage for persistent sessions
+      localStorage.setItem('user_data', JSON.stringify(responseData.user));
+      // Use our helper to ensure token is set for all API requests
+      setAuthToken(responseData.token);
+      setUser(responseData.user);
+      return responseData;
+    } catch (error) {
+      console.error('Login error in provider:', error);
+      throw error;
+    }
+  };
+
+  const handleRegister = async (data: RegisterInput): Promise<AuthResponse> => {
+    const response = await apiRequest('/api/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Registration failed');
+    }
+
+    const responseData: AuthResponse = await response.json();
+    // Store user data in localStorage for persistent sessions
+    localStorage.setItem('user_data', JSON.stringify(responseData.user));
+    // Use our helper to ensure token is set for all API requests
+    setAuthToken(responseData.token);
+    setUser(responseData.user);
+    return responseData;
+  };
+
+  const handleLogout = async (): Promise<void> => {
+    try {
+      await apiRequest('/api/auth/logout', {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      // Clear user data from localStorage
+      localStorage.removeItem('user_data');
+      
+      // Clear the token from both localStorage and axios defaults
+      setAuthToken(null);
+      setUser(null);
+    }
+  };
+
+  const value: UserContext = {
+    user,
+    isLoading,
+    isAuthenticated: !!user,
+    login: handleLogin,
+    register: handleRegister,
+    logout: handleLogout,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}

@@ -1,0 +1,102 @@
+import { Express } from "express";
+import { Server } from "http";
+import { setupAuthRoutes } from "./controllers/auth";
+import { setupAnalysisRoutes } from "./controllers/analysis";
+import { setupShippingRoutes } from "./controllers/shipping";
+
+export async function registerRoutes(app: Express): Promise<Express> {
+  // Status route
+  app.get("/api/status", (_, res) => {
+    res.json({ status: "ok", version: "1.0.0" });
+  });
+  
+  // Register authentication routes
+  setupAuthRoutes(app);
+  
+  // Register analysis routes
+  setupAnalysisRoutes(app);
+  
+  // Register shipping and tariff routes
+  setupShippingRoutes(app);
+  
+  // Handle all other routes for SPA support with hash router
+  app.get('*', (req, res, next) => {
+    // Skip API routes
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    
+    // Since we're using client-side hash routing with the HashRouter component,
+    // we don't actually need to serve the HTML for all paths as the hash part
+    // is processed entirely on the client. 
+    // Just continue the middleware chain for non-API routes.
+    next();
+  });
+  
+  // AI-powered HS Code suggestions endpoint
+  app.post('/api/hs-code-suggestions', async (req, res) => {
+    try {
+      console.log('🤖 HS Code request:', req.body);
+      const { productName, productDescription } = req.body;
+      
+      if (!productName?.trim()) {
+        return res.status(400).json({ error: 'Product name required' });
+      }
+
+      if (!process.env.OPENAI_API_KEY) {
+        return res.status(500).json({ error: 'API key not configured' });
+      }
+
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://tradenavigator.replit.dev',
+          'X-Title': 'TradeNavigator'
+        },
+        body: JSON.stringify({
+          model: 'openai/gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an HS code expert. Return JSON with suggestions array containing code, description, confidence, and reasoning.'
+            },
+            {
+              role: 'user',
+              content: `Product: ${productName}\nDescription: ${productDescription || 'None'}`
+            }
+          ],
+          temperature: 0.3
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`OpenRouter error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const aiContent = data.choices?.[0]?.message?.content;
+      
+      let suggestions = [];
+      try {
+        const parsed = JSON.parse(aiContent);
+        suggestions = parsed.suggestions || parsed;
+      } catch (e) {
+        suggestions = [{ code: "000000", description: "Parse error", confidence: 0.1, reasoning: "AI response parsing failed" }];
+      }
+
+      console.log('✅ Returning suggestions:', suggestions);
+      res.json({ suggestions });
+      
+    } catch (error) {
+      console.error('🚨 HS Code error:', error);
+      res.status(500).json({ 
+        error: 'AI service temporarily unavailable',
+        suggestions: []
+      });
+    }
+  });
+
+  return app;
+}

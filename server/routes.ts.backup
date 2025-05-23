@@ -1,0 +1,110 @@
+import { Express } from "express";
+import { Server } from "http";
+import { setupAuthRoutes } from "./controllers/auth";
+import { setupAnalysisRoutes } from "./controllers/analysis";
+import { setupShippingRoutes } from "./controllers/shipping";
+
+export async function registerRoutes(app: Express): Promise<Express> {
+  // Status route
+  app.get("/api/status", (_, res) => {
+    res.json({ status: "ok", version: "1.0.0" });
+  });
+  
+  // Register authentication routes
+  setupAuthRoutes(app);
+  
+  // Register analysis routes
+  setupAnalysisRoutes(app);
+  
+  // Register shipping and tariff routes
+  setupShippingRoutes(app);
+  
+  // Handle all other routes for SPA support with hash router
+  app.get('*', (req, res, next) => {
+    // Skip API routes
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    
+    // Since we're using client-side hash routing with the HashRouter component,
+    // we don't actually need to serve the HTML for all paths as the hash part
+    // is processed entirely on the client. 
+    // Just continue the middleware chain for non-API routes.
+    next();
+  });
+  
+  // AI-powered HS Code suggestions endpoint
+  app.post('/api/ai/hs-code-suggestions', async (req, res) => {
+    try {
+      const { productName, productDescription } = req.body;
+
+      if (!productName?.trim()) {
+        return res.status(400).json({ error: 'Product name is required' });
+      }
+
+      // Use OpenAI to analyze the product and suggest HS codes
+      const prompt = `You are an expert in international trade and HS (Harmonized System) codes. Analyze the following product and suggest the 3 most accurate HS codes with confidence scores.
+
+Product Name: ${productName}
+Product Description: ${productDescription || 'No additional description provided'}
+
+For each suggestion, provide:
+1. The 6-digit HS code
+2. A clear description of what this code covers
+3. A confidence percentage (0-100)
+4. Brief reasoning for why this code fits
+
+Respond in JSON format with an array of suggestions. Example:
+{
+  "suggestions": [
+    {
+      "code": "123456",
+      "description": "Description of what this code covers",
+      "confidence": 95,
+      "reasoning": "This code fits because..."
+    }
+  ]
+}`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
+          messages: [
+            {
+              role: "system",
+              content: "You are an expert trade compliance specialist who helps businesses find accurate HS codes for their products. Always provide practical, actionable suggestions with confidence scores."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.3, // Lower temperature for more consistent, accurate responses
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`OpenAI API error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const aiResponse = JSON.parse(data.choices[0].message.content);
+
+      res.json(aiResponse);
+    } catch (error) {
+      console.error('Error generating HS code suggestions:', error);
+      res.status(500).json({ 
+        error: 'Failed to generate suggestions',
+        suggestions: []
+      });
+    }
+  });
+
+  return app;
+}

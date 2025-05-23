@@ -1,0 +1,248 @@
+import React, { useState } from 'react';
+import { Link } from 'wouter';
+import { useAuth } from '../providers/AuthProvider';
+import { useToast } from '../hooks/use-toast';
+
+type ProfileFormValues = {
+  email: string;
+  companyName: string;
+  industry: string;
+};
+
+export default function Profile() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState<ProfileFormValues>({
+    email: user?.email || '',
+    companyName: user?.companyName || '',
+    industry: user?.industry || '',
+  });
+
+  // Update form data when user data is loaded
+  React.useEffect(() => {
+    if (user) {
+      setFormData({
+        email: user.email,
+        companyName: user.companyName,
+        industry: user.industry || '',
+      });
+    }
+  }, [user]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      // Here you would call your API to update the profile
+      // For now, we'll simulate a successful update
+      toast({
+        title: "Profile updated",
+        description: "Your profile information has been updated successfully.",
+      });
+      setIsEditing(false);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Update failed",
+        description: "There was a problem updating your profile.",
+      });
+    }
+  };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-lg">Please login to view your profile.</p>
+          <Link href="/auth/login" className="text-primary hover:underline mt-4 inline-block">
+            Go to Login
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="border-b border-border">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <Link href="/" className="text-2xl font-bold text-primary">TradeNavigator</Link>
+            </div>
+            <nav className="hidden md:flex space-x-4">
+              <Link href="/" className="nav-link">Dashboard</Link>
+              <Link href="/profile" className="nav-link-active">Profile</Link>
+              <button className="nav-link">Logout</button>
+            </nav>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center mb-8">
+          <Link href="/" className="text-primary hover:underline mr-2">Dashboard</Link>
+          <span className="mx-2">/</span>
+          <span className="text-muted-foreground">Profile</span>
+        </div>
+
+        <h1 className="text-3xl font-bold mb-8">User Profile</h1>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="md:col-span-2">
+            <div className="bg-card rounded-lg shadow-md p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-semibold">Profile Information</h2>
+                {!isEditing && (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+                  >
+                    Edit Profile
+                  </button>
+                )}
+              </div>
+
+              <form onSubmit={onSubmit}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Email</label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={formData.email}
+                      onChange={handleInputChange}
+                      disabled={!isEditing}
+                      className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary disabled:bg-muted/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Company Name</label>
+                    <input
+                      type="text"
+                      name="companyName"
+                      value={formData.companyName}
+                      onChange={handleInputChange}
+                      disabled={!isEditing}
+                      className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary disabled:bg-muted/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Industry</label>
+                    <select
+                      name="industry"
+                      value={formData.industry}
+                      onChange={handleInputChange}
+                      disabled={!isEditing}
+                      className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary disabled:bg-muted/50"
+                    >
+                      <option value="">Select an industry</option>
+                      <option value="manufacturing">Manufacturing</option>
+                      <option value="retail">Retail</option>
+                      <option value="technology">Technology</option>
+                      <option value="agriculture">Agriculture</option>
+                      <option value="healthcare">Healthcare</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+
+                  {isEditing && (
+                    <div className="flex gap-3 mt-6">
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+                      >
+                        Save Changes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditing(false)}
+                        className="px-4 py-2 bg-muted text-foreground rounded-md hover:bg-muted/90 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </form>
+            </div>
+
+            <div className="bg-card rounded-lg shadow-md p-6 mt-6">
+              <h2 className="text-xl font-semibold mb-6">Password</h2>
+              <button
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+              >
+                Change Password
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="bg-card rounded-lg shadow-md p-6">
+              <h2 className="text-xl font-semibold mb-4">Subscription</h2>
+              <div className="mb-4">
+                <div className="text-sm text-muted-foreground mb-1">Current Plan</div>
+                <div className="font-medium text-lg">{user.subscriptionTier || 'Free'}</div>
+              </div>
+              <div className="mb-6">
+                <div className="text-sm text-muted-foreground mb-1">Status</div>
+                <div className="font-medium">
+                  <span className="inline-block px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                    {user.subscriptionStatus || 'Active'}
+                  </span>
+                </div>
+              </div>
+              <button
+                className="px-4 py-2 w-full bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+              >
+                Upgrade Plan
+              </button>
+            </div>
+
+            <div className="bg-card rounded-lg shadow-md p-6 mt-6">
+              <h2 className="text-xl font-semibold mb-4">Usage Statistics</h2>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Analyses Created</span>
+                    <span>12 / 20</span>
+                  </div>
+                  <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                    <div className="bg-primary h-full" style={{ width: '60%' }}></div>
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>API Calls</span>
+                    <span>258 / 500</span>
+                  </div>
+                  <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                    <div className="bg-primary h-full" style={{ width: '52%' }}></div>
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Storage Used</span>
+                    <span>18MB / 100MB</span>
+                  </div>
+                  <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                    <div className="bg-primary h-full" style={{ width: '18%' }}></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
